@@ -1,0 +1,46 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "CloudEdge SmartEye",
+        "description": "Set up yourCloudEdge account",
+        "data": {
+          "username": "Email",
+          "password": "Password",
+          "country_code": "Country Code",
+          "phone_code": "Phone Code",
+          "refresh_interval": "Refresh Interval (minutes)"
+        }
+      },
+      "reauth_confirm": {
+        "title": "CloudEdge SmartEye",
+        "description": "Re-authenticate yourCloudEdge account",
+        "data": {
+          "username": "Email",
+          "password": "Password",
+          "country_code": "Country Code",
+          "phone_code": "Phone Code",
+          "refresh_interval": "Refresh Interval (minutes)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to CloudEdge API",
+      "invalid_auth": "Invalid authentication credentials",
+      "unknown": "Unexpected error occurred"
+    },
+    "abort": {
+      "already_configured": "Account is already configured",
+      "reauth_successful": "Re-authentication was successful"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "data": {
+          "refresh_interval": "Refresh Interval (minutes)"
+        }
+      }
+    }
+  }
+}

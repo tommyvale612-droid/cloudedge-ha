@@ -1,0 +1,46 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "CloudEdge SmartEye",
+        "description": "Configura il tuo account CloudEdge",
+        "data": {
+          "username": "Email",
+          "password": "Password",
+          "country_code": "Codice Paese",
+          "phone_code": "Prefisso Telefonico",
+          "refresh_interval": "Intervallo di Aggiornamento (minuti)"
+        }
+      },
+      "reauth_confirm": {
+        "title": "CloudEdge SmartEye",
+        "description": "Riautentica il tuo account CloudEdge",
+        "data": {
+          "username": "Email",
+          "password": "Password",
+          "country_code": "Codice Paese",
+          "phone_code": "Prefisso Telefonico",
+          "refresh_interval": "Intervallo di Aggiornamento (minuti)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Impossibile connettersi alle API CloudEdge",
+      "invalid_auth": "Credenziali di autenticazione non valide",
+      "unknown": "Si è verificato un errore imprevisto"
+    },
+    "abort": {
+      "already_configured": "L'account è già configurato",
+      "reauth_successful": "La riautenticazione è stata completata con successo"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "data": {
+          "refresh_interval": "Intervallo di Aggiornamento (minuti)"
+        }
+      }
+    }
+  }
+}

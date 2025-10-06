@@ -1,0 +1,71 @@
+set_parameter:
+  name: Set Parameter
+  description: Set a parameter value for a CloudEdge device.
+  fields:
+    device_name:
+      name: Device Name
+      description: The name of the CloudEdge device.
+      required: true
+      selector:
+        text:
+    parameter_name:
+      name: Parameter Name
+      description: The name of the parameter to set (e.g., FRONT_LIGHT_SWITCH, MOTION_DET_ENABLE).
+      required: true
+      selector:
+        text:
+    value:
+      name: Value
+      description: The value to set for the parameter.
+      required: true
+      selector:
+        object:
+
+get_device_info:
+  name: Get Device Info
+  description: Retrieve detailed information about a CloudEdge device.
+  fields:
+    device_name:
+      name: Device Name
+      description: The name of the CloudEdge device.
+      required: true
+      selector:
+        text:
+    include_config:
+      name: Include Configuration
+      description: Whether to include device configuration parameters.
+      default: true
+      selector:
+        boolean:
+
+refresh_device:
+  name: Refresh Device
+  description: Refresh data for a specific device or all devices.
+  fields:
+    device_name:
+      name: Device Name
+      description: The name of the device to refresh. Leave empty to refresh all devices.
+      required: false
+      selector:
+        text:
+
+refresh_parameters:
+  name: Refresh Parameters
+  description: Refresh only the configuration parameters for a specific device.
+  fields:
+    device_name:
+      name: Device Name
+      description: The name of the device to refresh parameters for.
+      required: true
+      selector:
+        text:
+
+get_coordinator_info:
+  name: Get Coordinator Info
+  description: Get diagnostic information about the CloudEdge coordinator (refresh intervals, status, etc.).
+  fields: {}
+
+clear_cache:
+  name: Clear Cache
+  description: Clear the CloudEdge session cache file. This will force re-authentication on the next API call.
+  fields: {}
