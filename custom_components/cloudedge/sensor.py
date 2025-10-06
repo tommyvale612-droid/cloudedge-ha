@@ -74,7 +74,7 @@ async def async_setup_entry(
                         param_name = f"param_{param_code}"
                     enabled = param_code in ENABLED_BY_DEFAULT_SENSOR_PARAMS
                     if enabled:
-                        _LOGGER.info("Creating enabled-by-default sensor: %s (code %s)", param_name, param_code)
+                        _LOGGER.debug("Creating enabled-by-default sensor: %s (code %s)", param_name, param_code)
                     sensors.append(CloudEdgeGenericSensor(
                         coordinator, serial_number, device_info, param_name, param_code, param_info
                     ))

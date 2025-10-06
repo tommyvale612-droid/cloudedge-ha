@@ -81,7 +81,7 @@ async def async_setup_entry(
         # Add configuration-based switches
         if config := device_info.get("configuration"):
             device_name = device_info.get("name", serial_number)
-            _LOGGER.info("Device %s - Setting up switches", device_name)
+            _LOGGER.debug("Device %s - Setting up switches", device_name)
             
             # Add known switch parameters first
             for param_name, param_key in SWITCH_PARAMETERS.items():
@@ -103,7 +103,7 @@ async def async_setup_entry(
                         param_name = iot_param_info["name"].lower()
                         enabled = iot_param_info["name"] in ENABLED_BY_DEFAULT_SWITCH_PARAMS
                         if enabled:
-                            _LOGGER.info("Creating enabled-by-default switch: %s (code %s)", param_name, param_code)
+                            _LOGGER.debug("Creating enabled-by-default switch: %s (code %s)", param_name, param_code)
                         
                         switch = CloudEdgeGenericSwitch(
                             coordinator, serial_number, device_info, param_name, param_code, param_info
