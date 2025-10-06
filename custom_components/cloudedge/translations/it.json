@@ -2,7 +2,7 @@
   "config": {
     "step": {
       "user": {
-        "title": "CloudEdge SmartEye",
+        "title": "CloudEdge",
         "description": "Configura il tuo account CloudEdge",
         "data": {
           "username": "Email",
@@ -13,7 +13,7 @@
         }
       },
       "reauth_confirm": {
-        "title": "CloudEdge SmartEye",
+        "title": "CloudEdge",
         "description": "Riautentica il tuo account CloudEdge",
         "data": {
           "username": "Email",

@@ -1,5 +1,5 @@
 {
-  "name": "CloudEdge SmartEye",
+  "name": "CloudEdge",
   "hacs": "1.6.0",
   "domains": ["camera", "sensor", "switch"],
   "iot_class": "cloud_polling",
