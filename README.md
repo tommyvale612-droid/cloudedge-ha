@@ -1,4 +1,4 @@
-#CloudEdge Home Assistant Integration
+# CloudEdge Home Assistant Integration
 
 An Home Assistant integration for CloudEdge cameras. This integration provides control and monitoring of your CloudEdge devices through Home Assistant.
 The primary purpose of this integration is to enable **automation control** for your CloudEdge cameras. By integrating with Home Assistant, you can create powerful automations to manage your cameras based on your automations and routines such as automatically enable **motion detection** when the "Away from Home" mode is activated or nobody is detected at home.
