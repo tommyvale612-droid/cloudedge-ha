@@ -5,6 +5,11 @@ The primary purpose of this integration is to enable **automation control** for 
 
 > **Disclaimer**: This integration is currently in **beta**. While it provides an interface for interacting with CloudEdge cameras, there are some known and unknown issues (see the Beta Notice section) that will be addressed in future versions.
 
+## Support the Project
+
+If you find this library useful, consider supporting its development! Your contributions help maintain and improve the project.
+
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/I3I71LBUUU)
 
 ## Features
 
