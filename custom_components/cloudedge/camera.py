@@ -7,6 +7,7 @@ from typing import Any
 from homeassistant.components.camera import Camera, CameraEntityFeature
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -46,8 +47,6 @@ async def async_setup_entry(
         coordinator.async_add_listener(_handle_coordinator_update)
         async_add_entities([])
         return
-
-        coordinator._cameras_added = True
 
     cameras = []
     for serial_number, device_info in coordinator.data.items():
@@ -167,12 +166,39 @@ class CloudEdgeCamera(CoordinatorEntity[CloudEdgeCoordinator], Camera):
         except Exception as e:
             _LOGGER.error("Failed to turn off camera %s: %s", self._attr_name, e)
 
+    def _get_device_icon_url(self) -> str | None:
+        """Return the product icon URL stored in coordinator data."""
+        data = (
+            self.coordinator.data.get(self._serial_number)
+            if self.coordinator.data
+            else None
+        )
+        info = data or self._device_info
+        url = info.get("device_icon_url")
+        return url if isinstance(url, str) and url.startswith("http") else None
+
     async def async_camera_image(
         self, width: int | None = None, height: int | None = None
     ) -> bytes | None:
-        """Return bytes of camera image."""
-        # CloudEdge API doesn't provide direct image streaming in the library
-        # This would need to be implemented based on the camera's streaming protocol
-        # For now, we return None indicating no image is available
-        _LOGGER.debug("Camera image requested for %s - not implemented", self._attr_name)
-        return None
+        """Return still image bytes served through the HA camera proxy."""
+        url = self._get_device_icon_url()
+        if not url:
+            _LOGGER.debug("No device_icon_url for %s", self._attr_name)
+            return None
+
+        try:
+            session = async_get_clientsession(self.hass)
+            async with session.get(
+                url,
+                timeout=15,
+                headers={
+                    "User-Agent": (
+                        "Mozilla/5.0"
+                    ),
+                },
+            ) as resp:
+                resp.raise_for_status()
+                return await resp.read()
+        except Exception as err:
+            _LOGGER.debug("Could not fetch device icon for %s: %s", self._attr_name, err)
+            return None
