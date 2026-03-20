@@ -1,13 +1,13 @@
 {
   "domain": "cloudedge",
   "name": "CloudEdge",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "documentation": "https://github.com/fradaloisio/cloudedge-ha",
   "issue_tracker": "https://github.com/fradaloisio/cloudedge-ha/issues",
   "dependencies": [],
   "codeowners": ["@fradaloisio"],
   "requirements": [
-    "pycloudedge==0.1.4.dev1"
+    "pycloudedge==0.1.4.dev2"
   ],
   "config_flow": true,
   "iot_class": "cloud_polling",
