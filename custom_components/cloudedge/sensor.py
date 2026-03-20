@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -30,6 +31,8 @@ from cloudedge.iot_parameters import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+TIMESTAMP_PARAMETERS = {"LAST_CHECK_TIME", "DEVICE_ONLINE_TIME"}
 
 
 async def async_setup_entry(
@@ -254,6 +257,8 @@ class CloudEdgeGenericSensor(CloudEdgeBaseSensor):
             self._attr_device_class = SensorDeviceClass.HUMIDITY
             self._attr_native_unit_of_measurement = PERCENTAGE
             self._attr_state_class = SensorStateClass.MEASUREMENT
+        elif self._iot_param_name in TIMESTAMP_PARAMETERS:
+            self._attr_device_class = SensorDeviceClass.TIMESTAMP
 
     @property
     def available(self) -> bool:
@@ -261,7 +266,7 @@ class CloudEdgeGenericSensor(CloudEdgeBaseSensor):
         return self.coordinator.last_update_success and bool(self.coordinator.data)
 
     @property
-    def native_value(self) -> int | float | str | None:
+    def native_value(self) -> int | float | str | datetime | None:
         """Return the value of the sensor."""
         device_data = self.coordinator.data.get(self._serial_number)
         if not device_data:
@@ -272,7 +277,12 @@ class CloudEdgeGenericSensor(CloudEdgeBaseSensor):
             return None
         value = param_info.get("value")
         
-        if self._iot_param_name in BOOLEAN_PARAMETERS:
+        if self._iot_param_name in TIMESTAMP_PARAMETERS:
+            try:
+                return datetime.fromtimestamp(int(value), tz=timezone.utc)
+            except (ValueError, TypeError, OSError):
+                return None
+        elif self._iot_param_name in BOOLEAN_PARAMETERS:
             return int(value) if value is not None else None
         elif self._iot_param_name in PERCENTAGE_PARAMETERS:
             try:
