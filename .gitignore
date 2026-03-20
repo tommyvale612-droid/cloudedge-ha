@@ -2,6 +2,9 @@
 ha-config/
 !ha-config/.gitkeep
 docker-compose.yml
+ha-config-vanilla/
+!ha-config-vanilla/.gitkeep
+docker-compose-vanilla.yml
 
 # Docker
 .docker/
@@ -54,3 +57,5 @@ htmlcov/
 cloudedge_session_cache
 .cloudedge_session_cache
 .env
+
+test.py
