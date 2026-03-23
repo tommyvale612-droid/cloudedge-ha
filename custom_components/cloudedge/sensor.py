@@ -10,6 +10,9 @@ from homeassistant.components.sensor import (
     SensorDeviceClass,
     SensorStateClass,
 )
+
+# Valid states for the connection status sensor
+_CONNECTION_STATUS_OPTIONS = ["online", "dormancy", "offline", "unknown"]
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import PERCENTAGE, UnitOfTemperature
 from homeassistant.core import HomeAssistant
@@ -50,6 +53,11 @@ async def async_setup_entry(
 
     sensors = []
     for serial_number, device_info in coordinator.data.items():
+        # Connection status sensor is added for every device
+        sensors.append(CloudEdgeConnectionStatusSensor(
+            coordinator, serial_number, device_info
+        ))
+
         if config := device_info.get("configuration"):
             device_name = device_info.get("name", serial_number)
             _LOGGER.info("Device %s has %d parameters", device_name, len(config))
@@ -381,3 +389,81 @@ class CloudEdgeDeviceStatusSensor(CloudEdgeBaseSensor):
             "last_seen": device_data.get("last_seen"),
             "online": device_data.get("online", False),
         }
+
+
+class CloudEdgeConnectionStatusSensor(CloudEdgeBaseSensor):
+    """Sensor that exposes the three-state connection status of a camera.
+
+    States:
+      online   – camera is awake and reachable
+      dormancy – battery camera is asleep (will wake on command)
+      offline  – camera is unreachable
+      unknown  – status could not be determined
+    """
+
+    _attr_has_entity_name = True
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_options = _CONNECTION_STATUS_OPTIONS
+    _attr_entity_registry_enabled_default = True
+
+    def __init__(
+        self,
+        coordinator: CloudEdgeCoordinator,
+        serial_number: str,
+        device_info: dict[str, Any],
+    ) -> None:
+        """Initialize the connection status sensor."""
+        super().__init__(coordinator, serial_number, device_info)
+        self._attr_unique_id = f"{DOMAIN}_{serial_number}_connection_status"
+        self._attr_name = "Connection Status"
+
+    @property
+    def native_value(self) -> str | None:
+        """Return the current connection status."""
+        device_data = self.coordinator.data.get(self._serial_number)
+        if not device_data:
+            return None
+        status = device_data.get("connection_status", "unknown")
+        # Guard against unexpected values from the API
+        return status if status in _CONNECTION_STATUS_OPTIONS else "unknown"
+
+    @property
+    def icon(self) -> str:
+        """Return an icon that reflects the current connection state."""
+        status = self.native_value
+        if status == "online":
+            return "mdi:wifi"
+        if status == "dormancy":
+            return "mdi:sleep"
+        if status == "offline":
+            return "mdi:wifi-off"
+        return "mdi:help-circle-outline"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return extra diagnostic attributes."""
+        device_data = self.coordinator.data.get(self._serial_number)
+        if not device_data:
+            return {}
+        attrs: dict[str, Any] = {
+            "serial_number": self._serial_number,
+            "online_flag": device_data.get("online"),
+            "device_type": device_data.get("type"),
+        }
+        mqtt_connected = getattr(
+            self.coordinator, "_mqtt_listener", None
+        )
+        attrs["mqtt_connected"] = (
+            mqtt_connected.connected if mqtt_connected else False
+        )
+        last_event = device_data.get("last_motion_event")
+        if last_event:
+            attrs["last_event"] = last_event
+        last_time = device_data.get("last_motion_time")
+        if last_time:
+            from datetime import datetime, timezone
+            attrs["last_event_time"] = datetime.fromtimestamp(
+                last_time, tz=timezone.utc
+            ).isoformat()
+        return attrs

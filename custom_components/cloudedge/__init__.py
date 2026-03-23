@@ -32,6 +32,7 @@ from .services import async_setup_services, async_unload_services
 _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS: list[Platform] = [
+    Platform.BINARY_SENSOR,
     Platform.BUTTON,
     Platform.CAMERA,
     Platform.SENSOR,
@@ -83,6 +84,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Clean up cache when unloading (disable or remove integration)
     if entry.entry_id in hass.data[DOMAIN]:
         coordinator = hass.data[DOMAIN][entry.entry_id]
+        await hass.async_add_executor_job(coordinator._stop_mqtt)
         await hass.async_add_executor_job(coordinator.cleanup_cache)
     
     # Also clean up old cache file variants
@@ -140,6 +142,7 @@ class CloudEdgeCoordinator(DataUpdateCoordinator):
         self._authenticated = False
         self._setup_complete = False
         self._last_updated_device = None  # Track which device was last updated
+        self._mqtt_listener = None
         
         # Initialize data as empty dict to prevent None errors
         self.data: Dict[str, Any] = {}
@@ -186,6 +189,7 @@ class CloudEdgeCoordinator(DataUpdateCoordinator):
                 if session_age < 86400:  # Less than 24 hours
                     _LOGGER.debug("Found valid cached session (%d hours old)", session_age // 3600)
                     self._authenticated = True
+                    await self.hass.async_add_executor_job(self._start_mqtt)
                     return
                 else:
                     _LOGGER.debug("Cached session expired (%d hours old), will re-authenticate", session_age // 3600)
@@ -196,6 +200,8 @@ class CloudEdgeCoordinator(DataUpdateCoordinator):
             if success:
                 self._authenticated = True
                 _LOGGER.info("Initial CloudEdge authentication successful")
+                # Start MQTT listener for real-time push events
+                await self.hass.async_add_executor_job(self._start_mqtt)
             else:
                 self._authenticated = False
                 raise AuthenticationError("Initial authentication failed")
@@ -229,6 +235,186 @@ class CloudEdgeCoordinator(DataUpdateCoordinator):
             if "authentication" in str(exception).lower():
                 self._authenticated = False
             raise UpdateFailed(f"Error communicating with API: {exception}") from exception
+
+    def _start_mqtt(self) -> None:
+        """Start the MQTT listener for real-time push events."""
+        _LOGGER.info("_start_mqtt called (listener=%s)", self._mqtt_listener is not None)
+        if self._mqtt_listener is not None:
+            return
+        if self.client is None:
+            _LOGGER.warning("_start_mqtt: client is None")
+            return
+
+        try:
+            from cloudedge.mqtt import CloudEdgeMqttListener
+        except ImportError:
+            _LOGGER.warning("cloudedge.mqtt not importable — MQTT push disabled")
+            return
+
+        mqtt_cfg = self.client.get_mqtt_config()
+        _LOGGER.info("_start_mqtt: get_mqtt_config returned %s", bool(mqtt_cfg))
+        if not mqtt_cfg or not mqtt_cfg.get("mqtt_host"):
+            _LOGGER.warning("No MQTT config available from pycloudedge (mqtt key in session_data: %s)",
+                          "mqtt" in (self.client.session_data or {}))
+            return
+
+        def _on_event(device_id: str, evt_name: str, evt_type: int, is_motion: bool, extra: dict | None = None) -> None:
+            extra = extra or {}
+            _LOGGER.info(
+                "MQTT push event: %s  device_id=%s  motion=%s  url=%s",
+                evt_name, device_id, is_motion, bool(extra.get("url")),
+            )
+            known_ids = {
+                sn: str(d.get("device_id")) for sn, d in self.data.items()
+            }
+            _LOGGER.debug("MQTT matching device_id=%r against known: %s", device_id, known_ids)
+
+            matched_sn: str | None = None
+            matched_name: str | None = None
+
+            for sn, dev_data in self.data.items():
+                if str(dev_data.get("device_id")) == device_id:
+                    dev_data["connection_status"] = "online"
+                    if is_motion:
+                        dev_data["last_motion_event"] = evt_name
+                        dev_data["last_motion_time"] = time.time()
+                    matched_sn = sn
+                    matched_name = dev_data.get("name", sn)
+                    break
+
+            # Download and decrypt alarm snapshot in background
+            alarm_url = extra.get("url", "")
+            if alarm_url and matched_sn:
+                try:
+                    from cloudedge.image_decrypt import decrypt_jpgx3_from_url
+                    jpeg = decrypt_jpgx3_from_url(alarm_url, matched_sn)
+                    if jpeg and matched_sn in self.data:
+                        self.data[matched_sn]["last_alarm_image"] = jpeg
+                        self.data[matched_sn]["last_alarm_time"] = time.time()
+                        _LOGGER.info(
+                            "Alarm snapshot decrypted for %s (%d bytes)",
+                            matched_name, len(jpeg),
+                        )
+                except Exception as exc:
+                    _LOGGER.debug("Alarm image decrypt failed: %s", exc)
+
+            # Push coordinator update (drives binary_sensor, sensor, camera, etc.)
+            self.hass.loop.call_soon_threadsafe(
+                self.async_set_updated_data, dict(self.data)
+            )
+
+            # Fire a Home Assistant event so users can build automations
+            event_data = {
+                "device_id": device_id,
+                "serial_number": matched_sn or "",
+                "device_name": matched_name or "",
+                "event_type": evt_name,
+                "event_code": evt_type,
+                "is_motion": is_motion,
+                "alarm_image_url": alarm_url,
+            }
+            self.hass.loop.call_soon_threadsafe(
+                self.hass.bus.async_fire,
+                f"{DOMAIN}_event",
+                event_data,
+            )
+
+        def _on_connect() -> None:
+            _LOGGER.info("CloudEdge MQTT connected — receiving push events")
+
+        def _on_disconnect() -> None:
+            _LOGGER.debug("CloudEdge MQTT disconnected — will reconnect")
+
+        try:
+            listener = CloudEdgeMqttListener(
+                self.client,
+                on_event=_on_event,
+                on_connect=_on_connect,
+                on_disconnect=_on_disconnect,
+            )
+            if listener.start():
+                self._mqtt_listener = listener
+                _LOGGER.info("CloudEdge MQTT listener started: %s", listener.topic)
+            else:
+                _LOGGER.warning("CloudEdge MQTT listener failed to start")
+        except Exception as exc:
+            _LOGGER.warning("CloudEdge MQTT setup error: %s", exc)
+
+    def _stop_mqtt(self) -> None:
+        """Stop the MQTT listener."""
+        if self._mqtt_listener is not None:
+            self._mqtt_listener.stop()
+            self._mqtt_listener = None
+            _LOGGER.debug("CloudEdge MQTT listener stopped")
+
+    # How long (seconds) after the last MQTT event a device is considered "online".
+    _MQTT_ONLINE_WINDOW = 600  # 10 minutes
+
+    def _get_device_connection_status(self, serial_number: str) -> str:
+        """Return the connection status of a device.
+
+        Strategy:
+
+        1. If MQTT recently delivered an event for this device (within
+           ``_MQTT_ONLINE_WINDOW`` seconds), return ``"online"`` — this is the
+           only reliable indicator for battery cameras.
+        2. Otherwise query the OpenAPI ``/openapi/device/status`` endpoint
+           (or ``get_device_online_status()`` if available).
+        3. Fall back to the ``online`` flag from the device list.
+        """
+        # ── 1. MQTT-derived status ──────────────────────────────────────
+        existing = (self.data or {}).get(serial_number, {})
+        last_event = existing.get("last_motion_time")
+        if last_event and (time.time() - last_event) < self._MQTT_ONLINE_WINDOW:
+            return "online"
+
+        # ── 2. OpenAPI status ───────────────────────────────────────────
+        try:
+            if hasattr(self.client, "get_device_online_status"):
+                api_status = self.client.get_device_online_status(serial_number)
+                if api_status in ("online", "offline"):
+                    return api_status
+                # "dormancy" falls through to heuristic below
+
+            else:
+                # Inline fallback for older pycloudedge
+                import base64 as _b64
+                import hashlib as _hl
+                import hmac as _hmac
+
+                iot_keys = (self.client.session_data or {}).get("iotPlatformKeys", {})
+                if iot_keys and "accessid" in iot_keys and "accesskey" in iot_keys:
+                    access_id = iot_keys["accessid"]
+                    access_key = iot_keys["accesskey"]
+                    timeout = str(int(time.time()) + 60)
+                    formatted_sn = self.client._format_sn(serial_number)
+                    string_to_sign = f"GET\n\n\n{timeout}\n/openapi/device/status\nquery"
+                    sig = _b64.b64encode(
+                        _hmac.new(access_key.encode(), string_to_sign.encode(), _hl.sha1).digest()
+                    ).decode()
+                    resp = self.client._session.get(
+                        f"{self.client.OPENAPI_BASE_URL}/openapi/device/status",
+                        params={
+                            "accessid": access_id, "expires": timeout,
+                            "signature": sig, "action": "query",
+                            "deviceid": formatted_sn,
+                        },
+                        timeout=10,
+                    )
+                    if resp.status_code == 200:
+                        api_status = resp.json().get("status", "unknown")
+                        if api_status in ("online", "offline"):
+                            return api_status
+        except Exception as exc:
+            _LOGGER.debug("connection_status API fetch failed for %s: %s", serial_number, exc)
+
+        # ── 3. Heuristic: online flag from device list ──────────────────
+        online_flag = existing.get("online")
+        if online_flag is False:
+            return "offline"
+
+        # Battery cameras: API says "dormancy" and MQTT is quiet → dormancy
+        return "dormancy"
 
     def _fetch_data(self) -> Dict[str, Any]:
         """Fetch data from CloudEdge API."""
@@ -291,6 +477,7 @@ class CloudEdgeCoordinator(DataUpdateCoordinator):
                         raise AuthenticationError("Authentication failed")
                     self._authenticated = True
                     _LOGGER.info("Successfully authenticated with CloudEdge API")
+                    self._start_mqtt()
                 except Exception as auth_error:
                     _LOGGER.error("Authentication failed: %s", auth_error)
                     # Reset authentication state
@@ -377,6 +564,11 @@ class CloudEdgeCoordinator(DataUpdateCoordinator):
                             _LOGGER.debug("Could not get config for device %s: %s", device["name"], config_error)
                             device_info['configuration'] = {}
                         
+                        # Fetch dormancy-aware connection status
+                        device_info["connection_status"] = (
+                            self._get_device_connection_status(serial_number)
+                        )
+
                         device_data[serial_number] = device_info
                         
                         # Debug: Log configuration data structure

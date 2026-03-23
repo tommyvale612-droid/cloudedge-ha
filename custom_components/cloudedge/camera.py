@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 from homeassistant.components.camera import Camera, CameraEntityFeature
@@ -15,6 +16,8 @@ from . import CloudEdgeCoordinator
 from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
+
+ALARM_IMAGE_MAX_AGE = 3600  # show alarm snapshot for up to 1 hour
 
 
 async def async_setup_entry(
@@ -64,6 +67,7 @@ class CloudEdgeCamera(CoordinatorEntity[CloudEdgeCoordinator], Camera):
 
     _attr_has_entity_name = True
     _attr_supported_features = CameraEntityFeature.ON_OFF
+    _attr_content_type = "image/jpeg"
 
     def __init__(
         self,
@@ -79,6 +83,7 @@ class CloudEdgeCamera(CoordinatorEntity[CloudEdgeCoordinator], Camera):
         self._device_info = device_info
         self._attr_unique_id = f"{DOMAIN}_{serial_number}_camera"
         self._attr_name = device_info.get("name", f"Camera {serial_number}")
+        self._last_image: bytes | None = None
 
     @property
     def device_info(self) -> dict[str, Any]:
@@ -100,12 +105,12 @@ class CloudEdgeCamera(CoordinatorEntity[CloudEdgeCoordinator], Camera):
 
     @property
     def is_on(self) -> bool:
-        """Return true if camera is on."""
-        device_data = self.coordinator.data.get(self._serial_number)
-        if not device_data:
-            return False
-            
-        return device_data.get("online", False)
+        """Return true if camera is on.
+
+        Always True so HA keeps polling async_camera_image even when the
+        device is in dormancy — the alarm snapshot is still valid.
+        """
+        return True
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -123,7 +128,6 @@ class CloudEdgeCamera(CoordinatorEntity[CloudEdgeCoordinator], Camera):
 
         # Add configuration parameters if available
         if config := device_data.get("configuration"):
-            # Add some key configuration parameters
             for param_name, param_info in config.items():
                 if param_name in [
                     "DEVICE_RESOLUTION",
@@ -134,6 +138,16 @@ class CloudEdgeCamera(CoordinatorEntity[CloudEdgeCoordinator], Camera):
                     "LED_ENABLE",
                 ]:
                     attributes[param_name.lower()] = param_info.get("formatted", param_info.get("value"))
+
+        alarm_ts = device_data.get("last_alarm_time")
+        if alarm_ts:
+            import datetime as dt
+            attributes["last_alarm_snapshot"] = (
+                dt.datetime.fromtimestamp(alarm_ts, tz=dt.timezone.utc).isoformat()
+            )
+            alarm_img = device_data.get("last_alarm_image")
+            if alarm_img:
+                attributes["alarm_snapshot_size"] = len(alarm_img)
 
         return attributes
 
@@ -177,13 +191,51 @@ class CloudEdgeCamera(CoordinatorEntity[CloudEdgeCoordinator], Camera):
         url = info.get("device_icon_url")
         return url if isinstance(url, str) and url.startswith("http") else None
 
+    def _handle_coordinator_update(self) -> None:
+        """Cache alarm image locally when coordinator pushes new data."""
+        super()._handle_coordinator_update()
+        device_data = (
+            self.coordinator.data.get(self._serial_number)
+            if self.coordinator.data
+            else None
+        )
+        if not device_data:
+            return
+        img = device_data.get("last_alarm_image")
+        ts = device_data.get("last_alarm_time", 0)
+        if img and (time.time() - ts) < ALARM_IMAGE_MAX_AGE:
+            self._last_image = img
+            _LOGGER.debug(
+                "Cached alarm snapshot for %s (%d bytes)",
+                self._attr_name, len(img),
+            )
+
     async def async_camera_image(
         self, width: int | None = None, height: int | None = None
     ) -> bytes | None:
-        """Return still image bytes served through the HA camera proxy."""
+        """Return still image bytes served through the HA camera proxy.
+
+        Prefers the latest alarm snapshot (decrypted jpgx3) when available,
+        otherwise falls back to the device icon URL.
+        """
+        device_data = (
+            self.coordinator.data.get(self._serial_number)
+            if self.coordinator.data
+            else None
+        )
+        if device_data:
+            img = device_data.get("last_alarm_image")
+            ts = device_data.get("last_alarm_time", 0)
+            if img and (time.time() - ts) < ALARM_IMAGE_MAX_AGE:
+                self._last_image = img
+                return img
+
+        if self._last_image:
+            return self._last_image
+
         url = self._get_device_icon_url()
         if not url:
-            _LOGGER.debug("No device_icon_url for %s", self._attr_name)
+            _LOGGER.debug("No image source for %s", self._attr_name)
             return None
 
         try:
@@ -191,14 +243,12 @@ class CloudEdgeCamera(CoordinatorEntity[CloudEdgeCoordinator], Camera):
             async with session.get(
                 url,
                 timeout=15,
-                headers={
-                    "User-Agent": (
-                        "Mozilla/5.0"
-                    ),
-                },
+                headers={"User-Agent": "Mozilla/5.0"},
             ) as resp:
                 resp.raise_for_status()
-                return await resp.read()
+                data = await resp.read()
+                self._last_image = data
+                return data
         except Exception as err:
             _LOGGER.debug("Could not fetch device icon for %s: %s", self._attr_name, err)
             return None
