@@ -75,6 +75,6 @@ This integration is currently in **beta**. While it provides an interface for in
 
 - **Status Reliability**: The API always shows the camera as online, which may not reflect the actual status.
 - **Refresh Reliability**: The API refreshes only after some time when the CloudEdge app is not opened on the phone. This does not impact device control.
-- **Regional Support**: Currently, only European accounts are supported. Work is in progress to dynamically gather `BASE_URL` and `OPENAPI_BASE_URL` for other regions.
+- **Streaming support**: Live streaming is not supported yet and will be added in a future version.
 
 We appreciate your understanding and welcome feedback to improve the library.
