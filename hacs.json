@@ -1,6 +1,7 @@
 {
   "name": "CloudEdge",
   "hacs": "1.6.0",
+  "hide_default_branch": true,
   "domains": ["camera", "sensor", "switch"],
   "iot_class": "cloud_polling",
   "homeassistant": "2023.1.0"
