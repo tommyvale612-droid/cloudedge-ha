@@ -69,6 +69,91 @@ logger:
 
 Then restart Home Assistant and check the logs for detailed information.
 
+## Automation Examples
+
+One of the main goals of this integration is making CloudEdge cameras useful inside Home Assistant automations.
+In a typical setup you will use:
+
+- `binary_sensor.*_motion` entities as triggers
+- `camera.*` entities to attach the latest snapshot to a notification
+- `switch.*_motion_detection` entities to enable or disable motion detection
+
+Replace the example entity IDs and notification service below with your own names from Developer Tools.
+
+### Notify when a camera detects motion
+
+This example sends a mobile notification and includes the latest CloudEdge camera snapshot.
+
+```yaml
+alias: CloudEdge alerts
+description: ""
+triggers:
+  - trigger: state
+    entity_id:
+      - binary_sensor.balcony_motion
+      - binary_sensor.garage_motion
+    to: "on"
+
+variables:
+  camera_map:
+    binary_sensor.citofono_motion: camera.balcony_balcony
+    binary_sensor.garage_motion: camera.garage_garage
+  camera_entity: "{{ camera_map[trigger.entity_id] }}"
+  name: "{{ trigger.to_state.name | default(trigger.entity_id) }}"
+
+actions:
+  - action: notify.mobile_app_XXX
+    data:
+      title: "Alert triggered {{ name }}"
+      message: "Alert triggered {{ name }}"
+      data:
+        image: "/api/camera_proxy/{{ camera_entity }}"
+
+mode: single
+```
+
+### Away From Home example
+
+If you use an `input_boolean`, presence automation, or alarm mode helper, you can arm all cameras at once by enabling motion detection when nobody is home.
+
+The exact `switch.*_motion_detection` entity IDs may differ depending on your device names, so confirm them in Home Assistant Developer Tools before copying this example.
+
+```yaml
+input_boolean:
+  away_from_home:
+    name: Away From Home
+    icon: mdi:home-export-outline
+
+automation:
+  - alias: CloudEdge - Enable motion detection on all cameras when away
+    trigger:
+      - platform: state
+        entity_id: input_boolean.away_from_home
+        to: "on"
+    action:
+      - service: switch.turn_on
+        target:
+          entity_id:
+            - switch.balcony_motion_detection
+            - switch.garage_motion_detection
+            - switch.backyard_motion_detection
+    mode: single
+
+  - alias: CloudEdge - Disable motion detection on all cameras when back home
+    trigger:
+      - platform: state
+        entity_id: input_boolean.away_from_home
+        to: "off"
+    action:
+      - service: switch.turn_off
+        target:
+          entity_id:
+            - switch.balcony_motion_detection
+            - switch.garage_motion_detection
+            - switch.backyard_motion_detection
+    mode: single
+```
+
 ## Beta Notice
 
 This integration is currently in **beta**. While it provides an interface for interacting with CloudEdge cameras, there are some known and unknown issues that will be addressed in future versions:
@@ -77,4 +162,4 @@ This integration is currently in **beta**. While it provides an interface for in
 - **Refresh Reliability**: The API refreshes only after some time when the CloudEdge app is not opened on the phone. This does not impact device control.
 - **Streaming support**: Live streaming is not supported yet and will be added in a future version.
 
-We appreciate your understanding and welcome feedback to improve the library.
+We appreciate your understanding and welcome feedback to improve the integration.
