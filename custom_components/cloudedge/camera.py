@@ -66,7 +66,7 @@ class CloudEdgeCamera(CoordinatorEntity[CloudEdgeCoordinator], Camera):
     """Representation of a CloudEdge camera."""
 
     _attr_has_entity_name = True
-    _attr_supported_features = CameraEntityFeature.ON_OFF
+    _attr_supported_features = CameraEntityFeature.ON_OFF | CameraEntityFeature.STREAM
     _attr_content_type = "image/jpeg"
 
     def __init__(
@@ -113,6 +113,11 @@ class CloudEdgeCamera(CoordinatorEntity[CloudEdgeCoordinator], Camera):
         return True
 
     @property
+    def is_streaming(self) -> bool:
+        """Return True if the live stream bridge is active."""
+        return self.coordinator.is_device_streaming(self._serial_number)
+
+    @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return extra state attributes."""
         device_data = self.coordinator.data.get(self._serial_number)
@@ -149,7 +154,13 @@ class CloudEdgeCamera(CoordinatorEntity[CloudEdgeCoordinator], Camera):
             if alarm_img:
                 attributes["alarm_snapshot_size"] = len(alarm_img)
 
+        attributes.update(self.coordinator.get_stream_diagnostics(self._serial_number))
+
         return attributes
+
+    async def stream_source(self) -> str | None:
+        """Return a local TCP MPEG-TS stream for Home Assistant."""
+        return await self.coordinator.async_get_stream_source(self._serial_number)
 
     async def async_turn_on(self) -> None:
         """Turn on camera."""

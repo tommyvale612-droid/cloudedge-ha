@@ -28,6 +28,7 @@ from .const import (
     DEFAULT_REFRESH_INTERVAL,
 )
 from .services import async_setup_services, async_unload_services
+from .stream_bridge import CloudEdgeStreamManager
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -35,6 +36,7 @@ PLATFORMS: list[Platform] = [
     Platform.BINARY_SENSOR,
     Platform.BUTTON,
     Platform.CAMERA,
+    Platform.SELECT,
     Platform.SENSOR,
     Platform.SWITCH,
 ]
@@ -85,6 +87,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if entry.entry_id in hass.data[DOMAIN]:
         coordinator = hass.data[DOMAIN][entry.entry_id]
         await hass.async_add_executor_job(coordinator._stop_mqtt)
+        await hass.async_add_executor_job(coordinator.stop_streams)
         await hass.async_add_executor_job(coordinator.cleanup_cache)
     
     # Also clean up old cache file variants
@@ -122,6 +125,14 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
 class CloudEdgeCoordinator(DataUpdateCoordinator):
     """Class to manage fetching data from CloudEdge API."""
 
+    _MQTT_ONLINE_WINDOW = 600  # 10 minutes
+    _RUNTIME_DEVICE_KEYS = (
+        "last_motion_event",
+        "last_motion_time",
+        "last_alarm_image",
+        "last_alarm_time",
+    )
+
     def __init__(
         self,
         hass: HomeAssistant,
@@ -143,6 +154,7 @@ class CloudEdgeCoordinator(DataUpdateCoordinator):
         self._setup_complete = False
         self._last_updated_device = None  # Track which device was last updated
         self._mqtt_listener = None
+        self._stream_manager = CloudEdgeStreamManager(self)
         
         # Initialize data as empty dict to prevent None errors
         self.data: Dict[str, Any] = {}
@@ -159,6 +171,13 @@ class CloudEdgeCoordinator(DataUpdateCoordinator):
             update_interval=timedelta(minutes=refresh_interval),
         )
 
+    def _session_cache_path(self) -> str:
+        """Return the per-config-entry pycloudedge session cache path."""
+        return os.path.join(
+            self.hass.config.config_dir,
+            f"cloudedge_session_cache_{self.config_entry.entry_id}",
+        )
+
     async def async_validate_authentication(self):
         """Validate authentication during coordinator setup."""
         _LOGGER.debug("Validating CloudEdge authentication")
@@ -169,15 +188,13 @@ class CloudEdgeCoordinator(DataUpdateCoordinator):
 
             if self.client is None:
                 _LOGGER.debug("Initializing CloudEdge client for validation")
-                # Use config directory for session cache
-                cache_path = os.path.join(self.hass.config.config_dir, "cloudedge_session_cache")
                 self.client = CloudEdgeClient(
                     username=self.username,
                     password=self.password,
                     country_code=self.country_code,
                     phone_code=self.phone_code,
                     debug=True,  # Enable debug logging
-                    session_cache_file=cache_path
+                    session_cache_file=self._session_cache_path(),
                 )
 
             # Check if we have valid session data
@@ -347,8 +364,46 @@ class CloudEdgeCoordinator(DataUpdateCoordinator):
             self._mqtt_listener = None
             _LOGGER.debug("CloudEdge MQTT listener stopped")
 
-    # How long (seconds) after the last MQTT event a device is considered "online".
-    _MQTT_ONLINE_WINDOW = 600  # 10 minutes
+    def _has_recent_mqtt_activity(self, device_data: dict[str, Any] | None) -> bool:
+        """Return True if the device recently emitted an MQTT event."""
+        last_event = (device_data or {}).get("last_motion_time")
+        return bool(last_event and (time.time() - last_event) < self._MQTT_ONLINE_WINDOW)
+
+    def _merge_runtime_device_state(
+        self,
+        serial_number: str,
+        target: dict[str, Any],
+    ) -> None:
+        """Preserve transient runtime fields across full API refreshes."""
+        existing = (self.data or {}).get(serial_number)
+        if not existing:
+            return
+
+        for key in self._RUNTIME_DEVICE_KEYS:
+            if key in existing:
+                target[key] = existing[key]
+
+        if self.is_device_streaming(serial_number) or self._has_recent_mqtt_activity(target):
+            target["connection_status"] = "online"
+
+    def _publish_runtime_update(self) -> None:
+        """Push an in-memory device-state update to entities."""
+        if self.hass.loop.is_closed():
+            return
+        self.hass.loop.call_soon_threadsafe(
+            self.async_set_updated_data,
+            dict(self.data),
+        )
+
+    def set_runtime_connection_status(self, serial_number: str, status: str) -> None:
+        """Update the in-memory connection status for a single device."""
+        device_data = (self.data or {}).get(serial_number)
+        if not device_data:
+            return
+        if device_data.get("connection_status") == status:
+            return
+        device_data["connection_status"] = status
+        self._publish_runtime_update()
 
     def _get_device_connection_status(self, serial_number: str) -> str:
         """Return the connection status of a device.
@@ -362,10 +417,12 @@ class CloudEdgeCoordinator(DataUpdateCoordinator):
            (or ``get_device_online_status()`` if available).
         3. Fall back to the ``online`` flag from the device list.
         """
-        # ── 1. MQTT-derived status ──────────────────────────────────────
         existing = (self.data or {}).get(serial_number, {})
-        last_event = existing.get("last_motion_time")
-        if last_event and (time.time() - last_event) < self._MQTT_ONLINE_WINDOW:
+
+        # ── 1. Live stream or MQTT-derived status ───────────────────────
+        if self.is_device_streaming(serial_number):
+            return "online"
+        if self._has_recent_mqtt_activity(existing):
             return "online"
 
         # ── 2. OpenAPI status ───────────────────────────────────────────
@@ -431,15 +488,13 @@ class CloudEdgeCoordinator(DataUpdateCoordinator):
         try:
             if self.client is None:
                 _LOGGER.debug("Initializing CloudEdge client")
-                # Use config directory for session cache
-                cache_path = os.path.join(self.hass.config.config_dir, "cloudedge_session_cache")
                 self.client = CloudEdgeClient(
                     username=self.username,
                     password=self.password,
                     country_code=self.country_code,
                     phone_code=self.phone_code,
                     debug=True,  # Enable debug logging
-                    session_cache_file=cache_path
+                    session_cache_file=self._session_cache_path(),
                 )
 
             # Always validate and authenticate before making API calls
@@ -565,6 +620,7 @@ class CloudEdgeCoordinator(DataUpdateCoordinator):
                             device_info['configuration'] = {}
                         
                         # Fetch dormancy-aware connection status
+                        self._merge_runtime_device_state(serial_number, device_info)
                         device_info["connection_status"] = (
                             self._get_device_connection_status(serial_number)
                         )
@@ -602,7 +658,18 @@ class CloudEdgeCoordinator(DataUpdateCoordinator):
                         e,
                     )
                     # Add basic device info even if detailed info fails
-                    device_data[device["serial_number"]] = device
+                    serial_number = device["serial_number"]
+                    fallback_device = dict(device)
+                    self._merge_runtime_device_state(serial_number, fallback_device)
+                    fallback_device["connection_status"] = (
+                        self._get_device_connection_status(serial_number)
+                    )
+                    device_data[serial_number] = fallback_device
+
+            for serial_number, device_info in device_data.items():
+                self._merge_runtime_device_state(serial_number, device_info)
+
+            self._stream_manager.remove_missing(set(device_data))
 
             fetch_time = time.time() - start_time
             _LOGGER.info(
@@ -734,8 +801,56 @@ class CloudEdgeCoordinator(DataUpdateCoordinator):
             "last_update_time": self.last_update_success_time,
             "authenticated": self._authenticated,
             "device_count": len(self.data) if self.data else 0,
+            "active_streams": sum(
+                1 for serial_number in (self.data or {}) if self.is_device_streaming(serial_number)
+            ),
             "update_interval_seconds": self.update_interval.total_seconds() if self.update_interval else None,
         }
+
+    def get_device_for_stream(self, serial_number: str) -> Dict[str, Any] | None:
+        """Return the latest known device dict for live streaming."""
+        device = (self.data or {}).get(serial_number)
+        if device:
+            return device
+
+        if self.client and self.client.session_data:
+            try:
+                devices = self.client.get_all_devices()
+                for candidate in devices:
+                    if candidate.get("serial_number") == serial_number:
+                        return candidate
+            except Exception as err:
+                _LOGGER.debug("Failed to refresh stream device %s: %s", serial_number, err)
+        return None
+
+    async def async_get_stream_source(self, serial_number: str) -> str | None:
+        """Return a local stream source URL for the requested device."""
+        bridge = self._stream_manager.get_bridge(serial_number)
+        return await self.hass.async_add_executor_job(bridge.ensure_started)
+
+    def is_device_streaming(self, serial_number: str) -> bool:
+        """Return True if the bridge for the device is active."""
+        return self._stream_manager.is_streaming(serial_number)
+
+    def get_stream_profile(self, serial_number: str) -> str:
+        """Return the requested live stream profile."""
+        return self._stream_manager.get_profile(serial_number)
+
+    def set_stream_profile(self, serial_number: str, profile: str) -> None:
+        """Set the requested live stream profile."""
+        self._stream_manager.set_profile(serial_number, profile)
+
+    def get_stream_diagnostics(self, serial_number: str) -> Dict[str, object]:
+        """Return runtime streaming diagnostics."""
+        return self._stream_manager.diagnostics(serial_number)
+
+    def notify_stream_state_changed(self) -> None:
+        """Tell entity listeners that live stream state changed."""
+        self._publish_runtime_update()
+
+    def stop_streams(self) -> None:
+        """Stop every live stream bridge owned by this coordinator."""
+        self._stream_manager.stop_all()
     
     def cleanup_cache(self) -> None:
         """Clean up session cache file."""
