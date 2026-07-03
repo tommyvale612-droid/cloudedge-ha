@@ -424,6 +424,8 @@ class CloudEdgeConnectionStatusSensor(CloudEdgeBaseSensor):
         device_data = self.coordinator.data.get(self._serial_number)
         if not device_data:
             return None
+        if self.coordinator.is_device_streaming(self._serial_number):
+            return "online"
         status = device_data.get("connection_status", "unknown")
         # Guard against unexpected values from the API
         return status if status in _CONNECTION_STATUS_OPTIONS else "unknown"
@@ -450,6 +452,7 @@ class CloudEdgeConnectionStatusSensor(CloudEdgeBaseSensor):
             "serial_number": self._serial_number,
             "online_flag": device_data.get("online"),
             "device_type": device_data.get("type"),
+            "stream_active": self.coordinator.is_device_streaming(self._serial_number),
         }
         mqtt_connected = getattr(
             self.coordinator, "_mqtt_listener", None

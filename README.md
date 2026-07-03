@@ -14,6 +14,7 @@ If you find this library useful, consider supporting its development! Your contr
 ## Features
 
 - 🎥 **Camera Integration**: Full camera entity support with device information
+- 📡 **Live Streaming**: Experimental P2P live stream support for supported cameras
 - 📊 **Sensor Monitoring**: Battery levels, WiFi strength, motion sensitivity, and more
 - 🔧 **Device Control**: Switch entities for lights, motion detection, LED status, and notifications
 - � **Complete Parameter Access**: All device parameters exposed as entities (disabled by default)
@@ -68,6 +69,21 @@ logger:
 ```
 
 Then restart Home Assistant and check the logs for detailed information.
+
+## Live Streaming
+
+Supported cameras expose a Home Assistant `camera.*` entity with experimental
+live streaming. Battery-powered CloudEdge cameras wake only for finite live-view
+windows, so the stream may reconnect when the camera goes back to sleep.
+
+Each camera also exposes a **Stream profile** select entity:
+
+- `Auto`: starts with `HD` and switches to `SD` if the live stream is degraded.
+- `HD`: uses the camera's main/high-quality stream.
+- `SD`: uses the camera's secondary/lower-bandwidth stream.
+
+Use `HD` when you want the best quality and the connection is stable. Use `SD`
+when the stream is choppy, stalls, or the camera is on a slower connection.
 
 ## Automation Examples
 
@@ -160,6 +176,6 @@ This integration is currently in **beta**. While it provides an interface for in
 
 - **Status Reliability**: The API always shows the camera as online, which may not reflect the actual status.
 - **Refresh Reliability**: The API refreshes only after some time when the CloudEdge app is not opened on the phone. This does not impact device control.
-- **Streaming support**: Live streaming is not supported yet and will be added in a future version.
+- **Streaming support**: Live streaming is experimental. It depends on CloudEdge P2P behavior and may be less smooth than the official mobile app on some accounts or regions.
 
 We appreciate your understanding and welcome feedback to improve the integration.
