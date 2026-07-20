@@ -263,3 +263,7 @@ SENSOR_DEVICE_CLASS_TEMPERATURE = "temperature"
 SENSOR_UNIT_PERCENTAGE = "%"
 SENSOR_UNIT_CELSIUS = "°C"
 SENSOR_UNIT_DECIBEL = "dB"
+
+# Modifiche per ieGeek
+SOURCE_APP = "81"
+API_HOST = "apis-eu-frankfurt.cloudedge360.com"
