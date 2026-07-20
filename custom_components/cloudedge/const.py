@@ -11,8 +11,8 @@ CONF_REFRESH_INTERVAL = "refresh_interval"
 
 # Default values
 DEFAULT_REFRESH_INTERVAL = 5  # minutes
-DEFAULT_COUNTRY_CODE = "US"
-DEFAULT_PHONE_CODE = "+1"
+DEFAULT_COUNTRY_CODE = "IT"
+DEFAULT_PHONE_CODE = "+39"
 
 # Supported country codes and phone codes
 COUNTRY_CODES = {
@@ -234,7 +234,7 @@ SWITCH_PARAMETERS = {
     "email_notifications": "EMAIL_ENABLE",
 }
 
-# Parameter names for sensors (mapped to parameter codes, not names)
+# Parameter names for sensors
 SENSOR_PARAMETERS = {
     "battery_level": "154",        # BATTERY_PERCENT
     "wifi_strength": "1007",       # WIFI_STRENGTH
@@ -243,15 +243,13 @@ SENSOR_PARAMETERS = {
     "device_temperature": "1012",  # DEVICE_TEMPERATURE
 }
 
-# Parameter codes that should be enabled by default for generic sensors (DIAGNOSTIC)
 ENABLED_BY_DEFAULT_SENSOR_PARAMS = [
-    "154",   # BATTERY_PERCENT - Battery percentage (diagnostic)
+    "154",   # BATTERY_PERCENT
 ]
 
-# Parameter names that should be enabled by default for switches (CONFIG)
 ENABLED_BY_DEFAULT_SWITCH_PARAMS = [
-    "MOTION_DET_ENABLE",  # Motion detection enable (config)
-    "LED_ENABLE",         # LED enable (config)
+    "MOTION_DET_ENABLE",
+    "LED_ENABLE",
 ]
 
 # Sensor device classes
@@ -264,6 +262,6 @@ SENSOR_UNIT_PERCENTAGE = "%"
 SENSOR_UNIT_CELSIUS = "°C"
 SENSOR_UNIT_DECIBEL = "dB"
 
-# Modifiche per ieGeek
+# Modifiche ieGeek
 SOURCE_APP = "81"
 API_HOST = "apis-eu-frankfurt.cloudedge360.com"
